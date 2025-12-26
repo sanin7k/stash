@@ -65,12 +65,3 @@ func MustInt(h *Header, key string) int64 {
 	}
 	return n
 }
-
-func ReadOffset(r *bufio.Reader) int64 {
-	h, err := ReadHeader(r)
-	if err != nil || h.Command != "OK" {
-		return 0
-	}
-	o, _ := strconv.ParseInt(h.Fields["offset"], 10, 64)
-	return o
-}
