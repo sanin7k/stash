@@ -29,13 +29,28 @@ func Backup(addr, path string) {
 	)
 	w.Flush()
 
-	offset := protocol.ReadOffset(r)
+	h, _ := protocol.ReadHeader(r)
+	if h.Command != "OK" {
+		return
+	}
+
+	offset := protocol.MustInt(h, "offset")
+	size := protocol.MustInt(h, "size")
+
+	if offset > size {
+		panic("invalid offset from server")
+	}
 
 	f, _ := os.Open(path)
 	defer f.Close()
-	f.Seek(offset, io.SeekStart)
+	f.Seek(offset, 0)
 
-	io.Copy(w, f)
+	remaining := size - offset
+
+	n, err := io.CopyN(w, f, remaining)
+	if err != nil || n != remaining {
+		panic("short upload")
+	}
 }
 
 func Restore(addr, name string) {
@@ -45,7 +60,7 @@ func Restore(addr, name string) {
 	}
 	defer conn.Close()
 
-	var offset int64 = 0
+	offset := int64(0)
 	if st, err := os.Stat(name); err == nil {
 		offset = st.Size()
 	}
@@ -59,13 +74,27 @@ func Restore(addr, name string) {
 	)
 	w.Flush()
 
-	confirmedOffset := protocol.ReadOffset(r)
+	h, _ := protocol.ReadHeader(r)
+	if h.Command != "OK" {
+		return
+	}
+
+	confirmedOffset := protocol.MustInt(h, "offset")
+	size := protocol.MustInt(h, "size")
+
+	if confirmedOffset > size {
+		panic("invalid offset from server")
+	}
 
 	f, _ := os.OpenFile(name, os.O_CREATE|os.O_WRONLY, 0644)
 	defer f.Close()
-
 	f.Seek(confirmedOffset, 0)
-	io.Copy(f, r)
+
+	remaining := size - confirmedOffset
+	n, err := io.CopyN(f, r, remaining)
+	if err != nil || n != remaining {
+		panic("short download")
+	}
 }
 
 func List(addr string) {
@@ -86,11 +115,9 @@ func List(addr string) {
 		return
 	}
 
-	for {
-		line, err := r.ReadString('\n')
-		if err != nil {
-			return
-		}
+	count := protocol.MustInt(h, "count")
+	for range count {
+		line, _ := r.ReadString('\n')
 		fmt.Print(line)
 	}
 }

@@ -36,7 +36,7 @@ func HandleConn(conn net.Conn) {
 
 func handleBackup(h *protocol.Header, r *bufio.Reader, w *bufio.Writer) {
 	name := h.Fields["name"]
-	size, _ := strconv.ParseInt(h.Fields["size"], 10, 64)
+	size := protocol.MustInt(h, "size")
 
 	f, offset, err := OpenForWrite(name)
 	if err != nil {
@@ -45,18 +45,26 @@ func handleBackup(h *protocol.Header, r *bufio.Reader, w *bufio.Writer) {
 	}
 	defer f.Close()
 
-	protocol.WriteOK(w, offset)
-	w.Flush()
+	if offset > size {
+		offset = 0
+	}
 
 	remaining := size - offset
-	if remaining > 0 {
-		io.CopyN(f, r, remaining)
+	protocol.WriteOK(w, map[string]int64{
+		"offset": offset,
+		"size":   size,
+	})
+	w.Flush()
+
+	n, err := io.CopyN(f, r, remaining)
+	if err != nil || n != remaining {
+		return
 	}
 }
 
 func handleRestore(h *protocol.Header, w *bufio.Writer) {
 	name := h.Fields["name"]
-	reqOffset, _ := strconv.ParseInt(h.Fields["offset"], 10, 64)
+	reqOffset := protocol.MustInt(h, "offset")
 
 	f, size, err := OpenForRead(name)
 	if err != nil {
@@ -69,11 +77,19 @@ func handleRestore(h *protocol.Header, w *bufio.Writer) {
 		reqOffset = 0
 	}
 
-	protocol.WriteOK(w, reqOffset)
+	remaining := size - reqOffset
+	protocol.WriteOK(w, map[string]int64{
+		"offset": reqOffset,
+		"size":   size,
+	})
 	w.Flush()
 
 	f.Seek(reqOffset, io.SeekStart)
-	io.Copy(w, f)
+
+	n, err := io.CopyN(w, f, remaining)
+	if err != nil || n != remaining {
+		return
+	}
 }
 
 func handleList(w *bufio.Writer) {
@@ -85,7 +101,18 @@ func handleList(w *bufio.Writer) {
 		return
 	}
 
-	w.WriteString("OK\n\n")
+	count := int64(0)
+	for _, e := range entries {
+		if !e.IsDir() {
+			count++
+		}
+	}
+
+	protocol.WriteOK(w, map[string]int64{
+		"count": count,
+	})
+	w.Flush()
+
 	for _, e := range entries {
 		if !e.IsDir() {
 			w.WriteString(e.Name() + "\n")

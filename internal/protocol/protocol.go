@@ -42,12 +42,28 @@ func ReadHeader(r *bufio.Reader) (*Header, error) {
 	return h, nil
 }
 
-func WriteOK(w *bufio.Writer, offset int64) {
-	fmt.Fprintf(w, "OK\noffset:%d\n\n", offset)
+func WriteOK(w *bufio.Writer, fields map[string]int64) {
+	w.WriteString("OK\n")
+	for k, v := range fields {
+		fmt.Fprintf(w, "%s:%d\n", k, v)
+	}
+	w.WriteString("\n")
 }
 
 func WriteError(w *bufio.Writer, msg string) {
 	fmt.Fprintf(w, "ERR\nmsg:%s\n\n", msg)
+}
+
+func MustInt(h *Header, key string) int64 {
+	v, ok := h.Fields[key]
+	if !ok {
+		panic("missing field: " + key)
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil {
+		panic("invalid int field: " + key)
+	}
+	return n
 }
 
 func ReadOffset(r *bufio.Reader) int64 {
